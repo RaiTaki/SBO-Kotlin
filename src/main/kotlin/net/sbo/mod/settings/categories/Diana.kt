@@ -2,19 +2,24 @@ package net.sbo.mod.settings.categories
 
 import com.teamresourceful.resourcefulconfigkt.api.CategoryKt
 import com.teamresourceful.resourcefulconfigkt.api.ObservableEntry
-import net.sbo.mod.SBOKotlin.mc
-import net.sbo.mod.diana.DianaTracker.announceLootToParty
 import net.sbo.mod.overlays.DianaLoot
 import net.sbo.mod.overlays.DianaMobs
-import net.sbo.mod.overlays.InquisLoot
+import net.sbo.mod.settings.categories.General.HideOwnWaypoints
 import net.sbo.mod.utils.Helper
 import net.sbo.mod.utils.chat.Chat
-import net.sbo.mod.utils.overlay.OverlayEditScreen
 import net.sbo.mod.utils.waypoint.AdditionalHubWarps
 
 
 
 object Diana : CategoryKt("Diana") {
+    enum class ShareList {
+        INQ, MANTICORE, KING, SPHINX
+    }
+
+    enum class ReceiveList {
+        INQ, MANTICORE, KING, SPHINX, OTHER
+    }
+
     enum class SettingDiana {
         INSTASELL, SELLOFFER;
 
@@ -105,7 +110,12 @@ object Diana : CategoryKt("Diana") {
     var mobTracker by ObservableEntry(
         enum(Tracker.OFF) {
             this.name = Translated("Mob Tracker")
-            this.description = Translated("Shows your Diana mob kills, /sboguis to move the overlay")
+            this.description = Translated(
+                "Shows your Diana mob kills, /sboguis to move the overlay\n" +
+                "§bNOTE!: You can interact with the tracker in the inventory!!!§r\n" +
+                "By clicking on a mob line you can hide/unhide it\n" +
+                "Hovering over some lines may display additional information"
+            )
         }
     ) { old, new ->
         if (old != new) {
@@ -115,9 +125,15 @@ object Diana : CategoryKt("Diana") {
         }
     }
 
-    var lootTracker by ObservableEntry( enum(Tracker.OFF) {
+    var lootTracker by ObservableEntry(
+        enum(Tracker.OFF) {
             this.name = Translated("Loot Tracker")
-            this.description = Translated("Shows your Diana loot, /sboguis to move the overlay")
+            this.description = Translated(
+                "Shows your Diana loot, /sboguis to move the overlay\n" +
+                    "§bNOTE!: You can interact with the tracker in the inventory!!!§r\n" +
+                    "By clicking on a loot line you can hide/unhide it\n" +
+                    "Hovering over some lines may display additional information"
+            )
         }
     ) { old, new ->
         if (old != new) {
@@ -127,14 +143,31 @@ object Diana : CategoryKt("Diana") {
         }
     }
 
-    var inquisTracker by ObservableEntry( enum(Tracker.OFF) {
-            this.name = Translated("Inquis Loot Tracker")
-            this.description = Translated("Shows your Inquisitor Loot so you see how lucky/unlucky you are (Shelmet/Plushie/Remedies), /sboguis to move the overlay")
+    var hideUnobtainedItems by ObservableEntry(
+        boolean(true) {
+            this.name = Translated("Hide Unobtained Items")
+            this.description = Translated("Hides any loot or mob lines that have not been tracked yet (value is 0) to reduce clutter in the overlays.")
         }
     ) { old, new ->
         if (old != new) {
-            if (new != Tracker.OFF) {
-                InquisLoot.updateLines()
+            if (lootTracker != Tracker.OFF) {
+                DianaLoot.updateLines()
+            }
+            if (mobTracker != Tracker.OFF) {
+                DianaMobs.updateLines()
+            }
+        }
+    }
+
+    var combineLootLines by ObservableEntry(
+        boolean(false) {
+            this.name = Translated("Combine LS Loot")
+            this.description = Translated("Combines the base item and the Loot Share (LS) variant into a single line. The individual LS count is shown on hover.")
+        }
+    ) { old, new ->
+        if (old != new) {
+            if (lootTracker != Tracker.OFF) {
+                DianaLoot.updateLines()
             }
         }
     }
@@ -256,47 +289,65 @@ object Diana : CategoryKt("Diana") {
         this.description = Translated("Removes the guess waypoint when you are within this distance of it (0 to disable)")
     }
 
+    var removeRareMobwaypoint by boolean(true) {
+        this.name = Translated("Remove Rare Mob Waypoint when near")
+        this.description = Translated("Removes the rare mob waypoint when you are within 3 blocks of it")
+    }
+
     init {
         separator {
-            this.title = "Inquistor"
+            this.title = "Rare Mobs"
         }
     }
 
-    var shareInq by boolean(true) {
-        this.name = Translated("Share Inquisitor")
-        this.description = Translated("Sends the coordinates of the inquisitor to party chat when it spawns")
+    var shareRareMob by boolean(true) {
+        this.name = Translated("Share Rare-Mob")
+        this.description = Translated("Sends the coordinates of rare mobs(King, Manti, Sphinx, Inq)to your party")
     }
 
-    var receiveInq by boolean(true) {
-        this.name = Translated("Receive Inquisitor")
-        this.description = Translated("Create a waypoint when someone in your party shares an inquisitor")
+    var ShareMobs by select(ShareList.INQ, ShareList.MANTICORE, ShareList.KING, ShareList.SPHINX) {
+        this.name = Translated("Select which Mobs to Share")
+        this.description = Translated("Select wich mobs to share")
+    }
+
+    var receiveRareMob by boolean(true) {
+        this.name = Translated("Receive Rare-Mob")
+        this.description = Translated("Create a waypoint when someone in your party shares a rare mob(King, Manti, Sphinx, Inq)")
+    }
+
+    var ReceiveMobs by select(ReceiveList.INQ, ReceiveList.MANTICORE, ReceiveList.KING, ReceiveList.SPHINX, ReceiveList.OTHER) {
+        this.name = Translated("Wich Mobs to Receive")
+        this.description = Translated(
+        "Select which mobs to receive\n" +
+            "§bOTHER = Rare mobs from players that dont ping with sbo (mainly skyhanni)"
+        )
     }
 
     var allWaypointsAreInqs by boolean(false) {
-        this.name = Translated("All Waypoints From Chat Are Inqs")
-        this.description = Translated("All coordinates from chat are considered Inquisitor waypoints (only works in Hub and during Diana event)")
+        this.name = Translated("All Waypoints are Rare Mobs")
+        this.description = Translated("All coordinates from chat are considered rare mobs(King, Manti, Sphinx, Inq) only works in hub during diana")
     }
 
     var announceKilltext by strings("") {
-        this.name = Translated("Send Text On Inq Spawn")
-        this.description = Translated("Sends a text on inq spawn 5 seconds after spawn, use {since} for mobs since inq, {chance} for inq chance")
+        this.name = Translated("Send Text On Rare Mob Spawn")
+        this.description = Translated("Sends a text on Rare Mob spawn 5 seconds after spawn, use {since} for mobs since mob, {chance} for mob chance")
     }
 
     var announceCocoon by boolean(false) {
-        this.name = Translated("Send Text On Inq Cocoon")
-        this.description = Translated("Sends a text on inq cocoon")
+        this.name = Translated("Send Text On Cocoon")
+        this.description = Translated("Sends a text on cocoon")
     }
 
     var cocoonTitle by boolean(false) {
-        this.name = Translated("Show Title On Inq Cocoon")
-        this.description = Translated("Shows a title on inq cocoon")
+        this.name = Translated("Show Title On Cocoon")
+        this.description = Translated("Shows a title on cocoon")
     }
 
     init {
         button {
-            title = "Send Test Inq Message"
+            title = "Send Test Message"
             text = "Send Test"
-            description = "Sends a test message for the inquisitor spawn message"
+            description = "Sends a test message for the Rare mob spawn message"
             onClick {
                 Chat.chat(announceKilltext[0])
             }

@@ -26,6 +26,7 @@ import net.sbo.mod.utils.data.Reqs
 import net.sbo.mod.utils.events.annotations.SboEvent
 import net.sbo.mod.utils.events.impl.game.DisconnectEvent
 import net.sbo.mod.utils.events.impl.PartyFinderRefreshListEvent
+import net.sbo.mod.utils.events.impl.game.ChatMessageEvent
 import net.sbo.mod.utils.http.Http.getInt
 import java.util.UUID
 import java.util.regex.Pattern
@@ -37,7 +38,6 @@ object PartyFinderManager {
     private var updateBool = false
     private var requeue = false
     private var ghostParty = false
-    private var requestSend = false
     private var usedPf = false
 
     private var partySize = 0
@@ -79,8 +79,6 @@ object PartyFinderManager {
     )
 
     fun init() {
-        trackMemberRegister()
-
         Register.command("sborequeue") {
             if (!inQueue) {
                 Chat.chat("§6[SBO] §eRequeuing party with last used requirements...")
@@ -199,7 +197,7 @@ object PartyFinderManager {
     ) {
         if (this.creatingParty) return
         this.partyReqs = reqs
-        this.partyNote = checkPartyNote(note)
+        this.partyNote = note
         this.partyType = type
         this.partySize = size
         this.usedPf = true
@@ -210,52 +208,61 @@ object PartyFinderManager {
     fun queueParty() {
         if (!this.creatingParty) return
         creatingParty = false
-        if (partyMember.size < partySize && !inQueue) {
-            try {
-                val currentTime = System.currentTimeMillis()
-                Http.sendGetRequest(
-                    "$API_URL/createParty?uuids=${partyMember.joinToString(",").replace("-", "")}" +
-                            "&reqs=$partyReqs" +
-                            "&note=$partyNote" +
-                            "&partytype=$partyType" +
-                            "&partysize=$partySize" +
-                            "&key=${sboData.sboKey}"
-                ).toJson<PartyAddResponse> { response ->
-                    if (response.success) {
-                        val timeTaken = System.currentTimeMillis() - currentTime
-                        inQueue = true
-                        creatingParty = false
-                        partyReqsMap = response.partyReqs!!
-                        SBOEvent.emit(PartyFinderRefreshListEvent())
+        if (partyMember.size > partySize) {
+            Chat.chat("§6[SBO] §4Party is over the limit. ${partyMember.size}/$partySize")
+            return
+        }
+        if (inQueue) {
+            Chat.chat("§6[SBO] §4Party is already in the queue.")
+            return
+        }
+        if (!isLeader) {
+            Chat.chat("§6[SBO] §4You must be the party leader to queue the party.")
+            return
+        }
 
-                        if (ghostParty) {
-                            removePartyFromQueue()
-                            ghostParty = false
-                        }
+        try {
+            val currentTime = System.currentTimeMillis()
+            Http.sendGetRequest(
+                "$API_URL/createParty?uuids=${partyMember.joinToString(",").replace("-", "")}" +
+                        "&reqs=$partyReqs" +
+                        "&note=${checkPartyNote(partyNote)}" +
+                        "&partytype=$partyType" +
+                        "&partysize=$partySize" +
+                        "&key=${sboData.sboKey}"
+            ).toJson<PartyAddResponse> { response ->
+                if (response.success) {
+                    val timeTaken = System.currentTimeMillis() - currentTime
+                    inQueue = true
+                    creatingParty = false
+                    partyReqsMap = response.partyReqs!!
+                    SBOEvent.emit(PartyFinderRefreshListEvent())
 
-                        if (requeue) {
-                            requeue = false
-                            Chat.clickableChat("§6[SBO] §eClick to dequeue party", "Dequeue Party", "/sbodequeue")
-                        }
-
-                        Chat.chat("§6[SBO] §eParty created successfully! Time taken: ${timeTaken}ms")
-
-                        if (isInParty) Chat.command("pc [SBO] Party now in queue.")
-                    } else {
-                        val errorMessage = response.error ?: "Unknown error"
-                        Chat.chat("§6[SBO] §4Failed to create party: ${errorMessage.replace("&", "§")}")
-
+                    if (ghostParty) {
+                        removePartyFromQueue()
+                        ghostParty = false
                     }
 
-                }.error { error ->
-                    Chat.chat("§6[SBO] §4Unexpected error while creating party: ${error.message}")
+                    if (requeue) {
+                        requeue = false
+                        Chat.clickableChat("§6[SBO] §eClick to dequeue party", "Dequeue Party", "/sbodequeue")
+                    }
+
+                    Chat.chat("§6[SBO] §eParty created successfully! Time taken: ${timeTaken}ms")
+
+                    if (isInParty) Chat.command("pc [SBO] Party now in queue.")
+                } else {
+                    val errorMessage = response.error ?: "Unknown error"
+                    Chat.chat("§6[SBO] §4Failed to create party: ${errorMessage.replace("&", "§")}")
+
                 }
 
-            } catch (e: Exception) {
-                return
+            }.error { error ->
+                Chat.chat("§6[SBO] §4Unexpected error while creating party: ${error.message}")
             }
-        } else {
-            Chat.chat("§6[SBO] §4Party is already in queue or full.")
+
+        } catch (_: Exception) {
+            return
         }
     }
 
@@ -268,7 +275,7 @@ object PartyFinderManager {
             Http.sendGetRequest(
                 "$API_URL/queuePartyUpdate?uuids=${partyMember.joinToString(",").replace("-", "")}" +
                         "&reqs=$partyReqs" +
-                        "&note=$partyNote" +
+                        "&note=${checkPartyNote(partyNote)}" +
                         "&partytype=$partyType" +
                         "&partysize=$partySize" +
                         "&key=${sboData.sboKey}"
@@ -383,45 +390,44 @@ object PartyFinderManager {
         }
     }
 
-    fun trackMemberRegister() {
-        Register.onChatMessage { message ->
-            val text = message.toFormattedString()
-            var match = false
-            leaderChangeRegexes.forEach {
-                if (it.matches(text)) {
-                    match = true
-                    isInParty = true
-                    isLeader = false
-                    removePartyFromQueue()
-                }
+    @SboEvent
+    fun trackMemberRegister(event: ChatMessageEvent) {
+        val text = event.message.toFormattedString()
+        var match = false
+        leaderChangeRegexes.forEach {
+            if (it.matches(text)) {
+                match = true
+                isInParty = true
+                isLeader = false
+                removePartyFromQueue()
             }
-            partyDisbandRegexes.forEach {
-                if (it.matches(text)) {
-                    creatingParty = false
-                    partyMemberCount = 1
-                    match = true
-                    isInParty = false
-                    removePartyFromQueue()
-                }
-            }
-            partyJoinRegexes.forEach {
-                if (it.matches(text)) {
-                    updateBool = true
-                    partyMemberCount += 1
-                    match = true
-                    isInParty = true
-                }
-            }
-            partyLeaveRegexes.forEach {
-                if (it.matches(text)) {
-                    updateBool = true
-                    partyMemberCount -= 1
-                    match = true
-                    isInParty = partyMemberCount > 1
-                }
-            }
-            if (match) trackMemberCount()
         }
+        partyDisbandRegexes.forEach {
+            if (it.matches(text)) {
+                creatingParty = false
+                partyMemberCount = 1
+                match = true
+                isInParty = false
+                removePartyFromQueue()
+            }
+        }
+        partyJoinRegexes.forEach {
+            if (it.matches(text)) {
+                updateBool = true
+                partyMemberCount += 1
+                match = true
+                isInParty = true
+            }
+        }
+        partyLeaveRegexes.forEach {
+            if (it.matches(text)) {
+                updateBool = true
+                partyMemberCount -= 1
+                match = true
+                isInParty = partyMemberCount > 1
+            }
+        }
+        if (match) trackMemberCount()
     }
 
     fun trackMemberCount() {

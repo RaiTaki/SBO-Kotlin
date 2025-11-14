@@ -1,28 +1,22 @@
 package net.sbo.mod.utils
 
-import com.mojang.authlib.properties.Property
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.component.DataComponentTypes
-import net.minecraft.component.type.ProfileComponent
-import net.minecraft.entity.Entity
-import net.minecraft.entity.EquipmentSlot
-import net.minecraft.entity.decoration.ArmorStandEntity
+import net.minecraft.component.type.LoreComponent
 import net.minecraft.item.ItemStack
-import net.minecraft.item.PlayerHeadItem
+import net.minecraft.text.Text
 import net.sbo.mod.SBOKotlin.mc
 import net.sbo.mod.diana.DianaTracker
 import net.sbo.mod.utils.data.DianaTracker as DianaTrackerDataClass
 import net.sbo.mod.overlays.DianaLoot
-import net.sbo.mod.settings.categories.Customization
 import net.sbo.mod.settings.categories.Debug
 import net.sbo.mod.settings.categories.Diana
-import net.sbo.mod.utils.SoundHandler.playCustomSound
 import net.sbo.mod.utils.chat.Chat
-import net.sbo.mod.utils.chat.ChatUtils.formattedString
 import net.sbo.mod.utils.data.SboDataObject
 import kotlin.concurrent.thread
 import net.sbo.mod.utils.data.DianaItemsData
 import net.sbo.mod.utils.data.DianaMobsData
+import net.sbo.mod.utils.data.npcSellValueMap
 import net.sbo.mod.utils.data.HypixelBazaarResponse
 import net.sbo.mod.utils.data.Item
 import net.sbo.mod.utils.events.Register
@@ -34,7 +28,6 @@ import net.sbo.mod.utils.game.Mayor
 import net.sbo.mod.utils.game.ScoreBoard
 import net.sbo.mod.utils.game.World
 import net.sbo.mod.utils.http.Http
-import net.sbo.mod.utils.math.SboVec
 import net.sbo.mod.utils.waypoint.WaypointManager.onLootshare
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -51,12 +44,18 @@ object Helper {
     var hasSpade: Boolean = false
     var lastDianaMobDeath: Long = 0L
     var lastInqDeath: Long = 0L
+    var lastKingDeath: Long = 0L
+    var lastSphinxDeath: Long = 0L
+    var lastMantiDeath: Long = 0L
     var currentScreen: Screen? = null
     var lastCocoon: Long = 0L
 
     private var hasTrackedInq: Boolean = false
+    private var hasTrackedKing: Boolean = false
+    private var hasTrackedSphinx: Boolean = false
+    private var hasTrackedManti: Boolean = false
+
     private var prevInv = mutableMapOf<String, Item>()
-    private var dianaMobNames: List<String> = listOf("Minos Inquisitor", "Minotaur", "Minos Champion", "Gaia Construct", "Azrael", "Bagheera", "Minos Hunter")
     private var priceDataAh: Map<String, Long> = emptyMap()
     private var priceDataBazaar: HypixelBazaarResponse? = null
 
@@ -68,7 +67,7 @@ object Helper {
         }
 
         Register.onTick(20) { // maybe better way to register this
-            hasSpade = playerHasItem("ANCESTRAL_SPADE")
+            hasSpade = playerHasItem("ANCESTRAL_SPADE") || playerHasItem("ARCHAIC_SPADE") || playerHasItem("DEIFIC_SPADE")
         }
 
         Register.onTick(20 * 60 * 5) {
@@ -89,7 +88,35 @@ object Helper {
                 }
             }
             lastInqDeath = System.currentTimeMillis()
+        } else if (event.name.contains("King Minos")) {
+            if (getSecondsPassed(lastLootShare) < 2 && !hasTrackedKing) {
+                hasTrackedKing = true
+                DianaTracker.trackItem("KING_MINOS_LS", 1)
+                sleep(2000) {
+                    hasTrackedKing = false
+                }
+            }
+            lastKingDeath = System.currentTimeMillis()
+        } else if (event.name.contains("Sphinx")) {
+            if (getSecondsPassed(lastLootShare) < 2 && !hasTrackedSphinx) {
+                hasTrackedSphinx = true
+                DianaTracker.trackItem("SPHINX_LS", 1)
+                sleep(2000) {
+                    hasTrackedSphinx = false
+                }
+            }
+            lastSphinxDeath = System.currentTimeMillis()
+        } else if (event.name.contains("Manticore")) {
+            if (getSecondsPassed(lastLootShare) < 2 && !hasTrackedManti) {
+                hasTrackedManti = true
+                DianaTracker.trackItem("MANTICORE_LS", 1)
+                sleep(2000) {
+                    hasTrackedManti = false
+                }
+            }
+            lastMantiDeath = System.currentTimeMillis()
         }
+
         if (dist <= 30) {
             allowSackTracking = true
             lastDianaMobDeath = System.currentTimeMillis()
@@ -305,14 +332,41 @@ object Helper {
 
             if (!stack.isEmpty) {
                 val customData = stack.get(DataComponentTypes.CUSTOM_DATA)
-                val item = Item(
-                    ItemUtils.getSBID(customData),
-                    ItemUtils.getUUID(customData),
-                    ItemUtils.getDisplayName(stack),
-                    ItemUtils.getTimestamp(customData),
-                    stack.count
-                )
-                val id = if (item.itemUUID != "") item.itemUUID else item.itemId
+                val lore = ItemUtils.getLoreList(stack)
+                var id: String
+                var item: Item
+                val sbId = ItemUtils.getSBID(customData)
+                // print for debugging the lore lines
+                var isChimera = false
+                if (sbId == "ENCHANTED_BOOK") {
+                    for (line in lore) {
+                        if (line.contains("Chimera")) {
+                            isChimera = true
+                            break
+                        }
+                    }
+                }
+
+                if (!isChimera) {
+                    item = Item(
+                        sbId,
+                        ItemUtils.getUUID(customData),
+                        ItemUtils.getDisplayName(stack),
+                        ItemUtils.getTimestamp(customData),
+                        stack.count
+                    )
+                    id = if (item.itemUUID != "") item.itemUUID else item.itemId
+                } else {
+                    item = Item(
+                        "CHIMERA",
+                        ItemUtils.getUUID(customData),
+                        "§d§lChimera",
+                        ItemUtils.getTimestamp(customData),
+                        stack.count
+                    )
+                    id = "CHIMERA"
+                }
+
                 if (invItems.containsKey(id)) {
                     invItems[id]?.count += item.count
                 } else {
@@ -445,8 +499,12 @@ object Helper {
     fun getItemPrice(sbId: String, amount: Int = 1): Long {
         val id = if (sbId == "CHIMERA") "ENCHANTMENT_ULTIMATE_CHIMERA_1" else sbId
         var ahPrice = priceDataAh[id]?.toDouble() ?: 0.0
-        if (id == "CROWN_OF_GREED")
-            ahPrice = if (ahPrice < 1000000.0) 1000000.0 else ahPrice
+        if (npcSellValueMap.containsKey(id)) {
+            val npcPrice = npcSellValueMap[id]?.toDouble() ?: 0.0
+            if (npcPrice > ahPrice) {
+                ahPrice = npcPrice
+            }
+        }
 
         val bazaarPrice = if (Diana.bazaarSettingDiana == Diana.SettingDiana.INSTASELL) {
             priceDataBazaar?.products?.get(id)?.quick_status?.sellPrice
@@ -508,32 +566,23 @@ object Helper {
         return " §7[MF:$mf] [L:$looting]"
     }
 
-    private val cocoonTexture = "eyJ0aW1lc3RhbXAiOjE1ODMxMjMyODkwNTMsInByb2ZpbGVJZCI6IjkxZjA0ZmU5MGYzNjQzYjU4ZjIwZTMzNzVmODZkMzllIiwicHJvZmlsZU5hbWUiOiJTdG9ybVN0b3JteSIsInNpZ25hdHVyZVJlcXVpcmVkIjp0cnVlLCJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNGNlYjBlZDhmYzIyNzJiM2QzZDgyMDY3NmQ1MmEzOGU3YjJlOGRhOGM2ODdhMjMzZTBkYWJhYTE2YzBlOTZkZiJ9fX0="
-    fun checkCocoon(entity: ArmorStandEntity): Boolean {
-        if(World.getWorld() != "Hub") return false
-        val lastInq = getSecondsPassed(lastInqDeath) < 5
-        if (!lastInq) return false
+    fun getKillsFromLore(stack: ItemStack?): Int {
+        if (stack == null || stack.isEmpty) return 0
 
-        val head: ItemStack = entity.getEquippedStack(EquipmentSlot.HEAD)
-        if(!head.isEmpty && head.item.toString().equals("minecraft:player_head")){
-            val profile: ProfileComponent? = head.get(DataComponentTypes.PROFILE)
-            val textures : Property? = profile?.properties?.get("textures")?.first()
-            val texture = textures?.value
-            if(texture.equals(cocoonTexture) && lastCocoon + 10000 < System.currentTimeMillis()){
-                lastCocoon = System.currentTimeMillis()
-                if(Diana.announceCocoon){
-                    sleep(200) {
-                        Chat.command("pc Cocoon!")
-                    }
-                }
-                if(Diana.cocoonTitle){
-                    showTitle("§r§6§l<§b§l§kO§6§l> §b§lCOCOON! §6§l<§b§l§kO§6§l>", null, 10, 40, 10)
-                    playCustomSound(Customization.inqSound[0], Customization.inqVolume)
-                }
-                return true
+        val linesList: List<Text> = stack.get(DataComponentTypes.LORE)?.lines ?: listOf()
+
+        for (lineText in linesList) {
+            val line = lineText.string
+            if (line.startsWith("Kills: ")) {
+                val numberString = line.substringAfter("Kills: ")
+                    .replace(",", "")
+                    .trim()
+
+                return numberString.toIntOrNull() ?: 0
             }
         }
-        return false
+
+        return 0
     }
 }
 

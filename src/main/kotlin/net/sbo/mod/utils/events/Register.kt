@@ -4,8 +4,6 @@ import com.mojang.brigadier.arguments.StringArgumentType
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
-import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
 import net.sbo.mod.utils.Helper.removeFormatting
 import net.sbo.mod.utils.chat.ChatHandler
@@ -65,18 +63,6 @@ object Register {
      */
     fun onTick(tick: Int, action: (unregister: () -> Unit) -> Unit) {
         tasks += ScheduledTask(tick, action)
-    }
-
-    /**
-     * Registers an event that listens for chat messages.
-     * The action receives the message as a `Text` object.
-     */
-    fun onChatMessage(
-        action: (message: Text) -> Unit
-    ) {
-        ClientReceiveMessageEvents.GAME.register { message, _ ->
-            action(message)
-        }
     }
 
     /**
